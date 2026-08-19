@@ -1,0 +1,17 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Test data (real replays/beatmaps exported from the local lazer database -
+# large and machine-specific; regenerate with the realm-db-reader exporters)
+/testdata/
+
+# Generated outputs
+*.tsv
+*.log
+batch_log.txt
+dbtest_log.txt
+dbfull_log.txt
+dbfull2_log.txt
+harness_sample_log.txt
+__pycache__/
