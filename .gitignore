@@ -15,3 +15,5 @@ dbfull_log.txt
 dbfull2_log.txt
 harness_sample_log.txt
 __pycache__/
+*.tsv*
+*.path

@@ -39,7 +39,9 @@ impl HitWindows {
         }
     }
 
-    /// `HitWindows.ResultFor` for osu (Great/Ok/Meh allowed).
+    /// `HitWindows.ResultFor` for osu (Great/Ok/Meh allowed, plus the fixed
+    /// 400ms Miss window: presses beyond the meh window but within 400ms
+    /// judge as Miss rather than being ignored).
     pub fn result_for(&self, time_offset: f64) -> HitResult {
         let time_offset = time_offset.abs();
         if time_offset <= self.great {
@@ -48,6 +50,8 @@ impl HitWindows {
             HitResult::Ok
         } else if time_offset <= self.meh {
             HitResult::Meh
+        } else if time_offset <= MISS_WINDOW {
+            HitResult::Miss
         } else {
             HitResult::None
         }
@@ -642,6 +646,15 @@ impl Engine {
         let label = if is_head { "head" } else { "circle" };
         if is_head {
             let head_idx = head_index_of(&self.objects[obj_idx]).unwrap();
+
+            // Nested slider heads are DrawableHitCircle too: their OnNewResult
+            // bubbles to the playfield, so HandleHit's forced misses apply
+            // before the head's own scoring (same ordering as circles; fires
+            // for any judged result, including Miss).
+            if !self.classic {
+                self.start_time_ordered_handle_hit(obj_idx, t);
+            }
+
             self.set_nested_result(obj_idx, head_idx, result, t, max_judgement, has_windows, label);
             self.runtime[obj_idx].slider.head_hit_action = if hit_result_ext::is_hit(result) {
                 Some(action)

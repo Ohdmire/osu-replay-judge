@@ -38,6 +38,25 @@ slider tick/repeat/tail、堆叠、双押顺序等全部判定语义）。
 同一回放两次运行 harness，其结果在 2~4 个事件间浮动（harness 的
 4x 实时节流与异步物件加载竞争所致）；Rust 实现是完全确定性的。
 
+### 随机抽样逐事件验证（seed=42，从 11631 对中抽 10 对）
+
+| 样本 | 类型 | 事件数 | 结果 |
+|------|------|-------:|------|
+| score2410 | lazer 2024 | 1289 | **0 差异** |
+| score8701 | lazer 2024 | 725 | **0 差异** |
+| score4977 | lazer 2024 | 617 | **0 差异**（修复：早于 meh 窗但 ±400ms 内的点击判 Miss + head 命中触发 HandleHit） |
+| score5468 | stable 2024 | 806 | **0 差异** |
+| score4622 | stable 2024 | 1153 | **0 差异** |
+| score4158 | stable DT | 1105 | 仅 1 个事件判定时刻差 ~0.7ms（结果全同） |
+| score5496 | stable DT | 1554 | 仅 3 个事件判定时刻差 ~0.3ms（结果全同） |
+| score6283 | lazer DT | 357 | 1 处 slider 结束时刻差 25ms 级联 |
+| score7161 | lazer DT | 1008 | 1 处 tail tracking 边缘（DT 双迭代网格相位）级联 |
+| score4475 | stable DT+HD | — | 基准侧未产出（harness 对该图异常），无法对比 |
+
+抽样过程还发现并修复了一个真实语义缺失：lazer 的 `HitWindows.ResultFor`
+包含**固定 400ms 的 Miss 窗口**——超出 meh 窗但在 ±400ms 内的点击会判
+Miss（并触发 HandleHit 强制 miss 链），而非无判定。
+
 ### 数据库导出的真实数据端到端验证
 
 用 [realm-db-reader](https://github.com/Ohdmire/realm-db-reader)（Rust）
