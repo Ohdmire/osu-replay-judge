@@ -500,13 +500,17 @@ impl Engine {
         self.cursor = cursor;
 
         if let Some(new_pressed) = new_pressed {
+            // The input state updates BEFORE events dispatch (framework
+            // semantics), so handlers (e.g. PostProcessHeadJudgement's
+            // tracking re-establish) see the new press.
+            let old_pressed = std::mem::replace(&mut self.pressed, new_pressed);
+
             // Press events dispatch in action order (left before right).
             for action in [Action::Left, Action::Right] {
-                if new_pressed.contains(&action) && !self.pressed.contains(&action) {
+                if self.pressed.contains(&action) && !old_pressed.contains(&action) {
                     self.dispatch_press(t, action);
                 }
             }
-            self.pressed = new_pressed;
         }
 
         let order = self.update_order.clone();
@@ -594,6 +598,13 @@ impl Engine {
     }
 
     fn circle_hit_attempt(&mut self, obj_idx: usize, is_head: bool, t: f64, action: Action) {
+        // HitReceptor records the FIRST hover-press action regardless of the
+        // judgement outcome (HitAction ??= action), which anchors the slider
+        // tracking key constraint.
+        if is_head && self.runtime[obj_idx].slider.head_hit_action.is_none() {
+            self.runtime[obj_idx].slider.head_hit_action = Some(action);
+        }
+
         // UpdateResult: already-judged objects never re-judge.
         if is_head {
             let head_idx = head_index_of(&self.objects[obj_idx]).unwrap();
@@ -656,11 +667,6 @@ impl Engine {
             }
 
             self.set_nested_result(obj_idx, head_idx, result, t, max_judgement, has_windows, label);
-            self.runtime[obj_idx].slider.head_hit_action = if hit_result_ext::is_hit(result) {
-                Some(action)
-            } else {
-                None
-            };
             self.post_process_head_judgement(obj_idx, t);
         } else {
             self.runtime[obj_idx].judged = true;

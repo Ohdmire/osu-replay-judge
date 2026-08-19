@@ -146,7 +146,9 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
                 };
                 let adjusted_beat_length = timing_point.beat_length * bpm_multiplier;
 
-                let velocity = BASE_SCORING_DISTANCE * difficulty.slider_multiplier as f64 / adjusted_beat_length;
+                // BASE_SCORING_DISTANCE and SliderMultiplier are floats in C#:
+                // the product rounds to f32 before the double division.
+                let velocity = (BASE_SCORING_DISTANCE as f32 * difficulty.slider_multiplier) as f64 / adjusted_beat_length;
                 // Intentionally not BASE_SCORING_DISTANCE * SliderMultiplier (stable float compat).
                 let scoring_distance = velocity * timing_point.beat_length;
 

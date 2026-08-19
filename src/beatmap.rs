@@ -187,7 +187,11 @@ struct PendingSegment {
     start_index: usize,
 }
 
-/// Port of `ConvertHitObjectParser.convertPathString` (stable-format branch).
+/// Port of `ConvertHitObjectParser.convertPathString`: produces a flat
+/// control point list. On implicit segment splits (duplicate control points)
+/// the FIRST of the duplicated pair stays in the list as a typed boundary
+/// marker and the second is dropped; `SliderPath` later splits at typed
+/// points, sharing the boundary point between segments.
 fn convert_path_string(point_string: &str, offset: Vec2, lazer_format: bool) -> Vec<PathControlPoint> {
     let split: Vec<&str> = point_string.split('|').collect();
 
@@ -212,7 +216,7 @@ fn convert_path_string(point_string: &str, offset: Vec2, lazer_format: bool) -> 
         }
     }
 
-    let mut control_points: Vec<(PathType, Vec<Vec2>)> = Vec::new();
+    let mut control_points: Vec<PathControlPoint> = Vec::new();
 
     for (i, segment) in segments.iter().enumerate() {
         let end = if i < segments.len() - 1 { segments[i + 1].start_index } else { points.len() };
@@ -222,23 +226,16 @@ fn convert_path_string(point_string: &str, offset: Vec2, lazer_format: bool) -> 
     }
 
     control_points
-        .into_iter()
-        .flat_map(|(kind, pts)| {
-            pts.into_iter().enumerate().map(move |(i, p)| PathControlPoint {
-                position: p,
-                kind: if i == 0 { Some(kind) } else { None },
-            })
-        })
-        .collect()
 }
 
-/// Emits one or more `(type, points)` segments (implicit segment splitting on
-/// duplicate control points).
+/// Appends the flat control point list for one explicit segment, mirroring
+/// `ConvertHitObjectParser.convertPoints` (implicit splits on duplicate
+/// points, perfect-curve edge rules).
 fn convert_points(
     mut kind: PathType,
     points: &[Vec2],
     end_point: Option<Vec2>,
-    output: &mut Vec<(PathType, Vec<Vec2>)>,
+    output: &mut Vec<PathControlPoint>,
     lazer_format: bool,
 ) {
     // Edge-case rules (to match stable).
@@ -265,6 +262,14 @@ fn convert_points(
     let mut start_index = 0usize;
     let mut end_index = 0usize;
 
+    let mut push_point = |pt: Vec2, ty: Option<PathType>, out: &mut Vec<PathControlPoint>| {
+        // The merged list drops the second of a duplicated pair; boundary
+        // points keep the segment type.
+        out.push(PathControlPoint { position: pt, kind: ty });
+    };
+
+    let _ = &mut push_point;
+
     while {
         end_index += 1;
         end_index < points.len()
@@ -284,12 +289,27 @@ fn convert_points(
             continue;
         }
 
-        output.push((kind, points[start_index..end_index].to_vec()));
+        // Emit [start_index, end_index): the point at end_index-1 becomes the
+        // typed boundary; the duplicate at end_index is skipped.
+        for (i, pt) in points[start_index..end_index].iter().enumerate() {
+            let ty = if i == 0 && start_index == 0 {
+                Some(kind)
+            } else if i == end_index - start_index - 1 {
+                Some(kind)
+            } else {
+                None
+            };
+            push_point(*pt, ty, output);
+        }
+
         start_index = end_index + 1;
     }
 
     if start_index < end_index {
-        output.push((kind, points[start_index..end_index].to_vec()));
+        for (i, pt) in points[start_index..end_index].iter().enumerate() {
+            let ty = if i == 0 && start_index == 0 { Some(kind) } else { None };
+            push_point(*pt, ty, output);
+        }
     }
 }
 
