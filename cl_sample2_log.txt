@@ -1,0 +1,5 @@
+[1/5] score6753 done (32s)
+[2/5] score5819 done (35s)
+[3/5] score0691 done (29s)
+[4/5] score4353 done (39s)
+[5/5] score0292 done (31s)
