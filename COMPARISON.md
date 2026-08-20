@@ -115,6 +115,17 @@ C# 当前代码（harness）为准，上表的 10 组全等即据此得出。
 
 ---
 
+### CL（stable 回放 / ModClassic）模式的准确性
+
+classic 路径的低存储吻合率（15-21%）**不是模拟误差**：抽取与存储统计
+不吻合的 legacy 分数跑真实 harness 验证——lazer 的 classic 模式重判
+结果与本项目 Rust 逐事件一致（score0001 零差异；score0009 仅 2 个
+1.3ms 时刻差），但**与 stable 存储值本身不同**（lazer 的 ModClassic
+是对 stable 的官方近似，非复刻：300/100 边界 ±几个、combo ±1-2）。
+
+classic 路径累计 harness 验证 8 组：6 组零差异、3 组各 1-3 个纯时刻差
+（含 classic+DT 组合、2021-2026 各年份）。
+
 ## 二、执行耗时对比
 
 同一谱面+回放，各自完整判定一遍：
