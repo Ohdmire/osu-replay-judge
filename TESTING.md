@@ -19,7 +19,7 @@ Statistics（300/100/50/miss）为参照，批量比对模拟结果。
 
 ### 2. C# 原版逐事件对比（正确性基准）
 
-`osu.Game.Rulesets.Osu.Tests/TestSceneReplayJudgeHarness`（本仓库配套）用
+`osu.Game.Rulesets.Osu.Tests/TestSceneReplayJudgeHarness`（配套基准，见下文复现说明）用
 **真实的 DrawableOsuRuleset + OsuScoreProcessor** 无头驱动同一回放，dump
 每个判定事件；`difftool.py` 逐事件比对 7 个字段：
 **时间 / 物件 / 判定结果 / combo / 分数 / acc / UR**。

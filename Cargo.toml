@@ -2,6 +2,12 @@
 name = "osu_replay_judge"
 version = "0.1.0"
 edition = "2024"
+license = "MIT"
+description = "osu!standard replay judge: a Rust reimplementation of osu!lazer judgement, per-event exact (score/combo/accuracy/unstable rate)"
+readme = "README.md"
+repository = "https://github.com/Ohdmire/osu-replay-judge"
+keywords = ["osu", "replay", "judgement", "beatmap", "lazer"]
+categories = ["game-development"]
 
 [dependencies]
 lzma-rs = "0.3.0"

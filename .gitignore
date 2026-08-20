@@ -17,3 +17,4 @@ harness_sample_log.txt
 __pycache__/
 *.tsv*
 *.path
+*.log
