@@ -59,6 +59,11 @@ pub struct ProcObject {
     pub radius: f32,
     pub time_preempt: f64,
     pub kind: ProcKind,
+    /// Combo chain (`OsuHitObject.UpdateComboInformation`).
+    pub new_combo: bool,
+    pub index_in_current_combo: u32,
+    /// 1-based combo colour index (colour = `(index-1) % colour_count`).
+    pub combo_index_with_offsets: u32,
 }
 
 impl ProcObject {
@@ -131,6 +136,9 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
                     radius,
                     time_preempt,
                     kind: ProcKind::Circle,
+                    new_combo: obj.new_combo,
+                    index_in_current_combo: 0,
+                    combo_index_with_offsets: 0,
                 });
             }
             RawHitObject::Slider { pos, path, repeat_count } => {
@@ -189,6 +197,9 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
                     radius,
                     time_preempt,
                     kind: ProcKind::Slider { path, nested, velocity, span_count, span_duration, duration },
+                    new_combo: obj.new_combo,
+                    index_in_current_combo: 0,
+                    combo_index_with_offsets: 0,
                 });
             }
             RawHitObject::Spinner { end_time } => {
@@ -224,6 +235,9 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
                     radius,
                     time_preempt,
                     kind: ProcKind::Spinner { spins_required, maximum_bonus_spins, ticks },
+                    new_combo: obj.new_combo,
+                    index_in_current_combo: 0,
+                    combo_index_with_offsets: 0,
                 });
             }
         }
@@ -232,6 +246,30 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
     // Objects arrive sorted by start time from the decoder.
     // Stage 2: stacking (PostProcess).
     apply_stacking(&mut objects, beatmap.version, beatmap.stack_leniency);
+
+    // Stage 3: combo chain (`OsuBeatmapProcessor.UpdateComboColours` ->
+    // `UpdateComboInformation` per object, in order).
+    {
+        let mut index_with_offsets = 0u32;
+        let mut in_current_combo = 0u32;
+        let mut prev_is_spinner = false;
+
+        for (i, obj) in objects.iter_mut().enumerate() {
+            let is_spinner = obj.is_spinner();
+            let starts_new = !is_spinner && (obj.new_combo || i == 0 || prev_is_spinner);
+
+            if starts_new {
+                in_current_combo = 0;
+                let combo_offset = beatmap.objects[i].combo_offset;
+                index_with_offsets += combo_offset + 1;
+            }
+
+            obj.index_in_current_combo = in_current_combo;
+            obj.combo_index_with_offsets = index_with_offsets;
+            in_current_combo += 1;
+            prev_is_spinner = is_spinner;
+        }
+    }
 
     let _ = classic_slider_behaviour;
 

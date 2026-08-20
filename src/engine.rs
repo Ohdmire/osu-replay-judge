@@ -83,6 +83,33 @@ pub struct TimelineEntry {
     pub time_offset: f64,
 }
 
+/// Visual state snapshot of one spinner, recorded per game frame.
+#[derive(Clone, Copy, Debug)]
+pub struct SpinnerSnap {
+    pub object_index: usize,
+    /// Raw accumulated visual rotation in degrees (`currentRotation`, can be
+    /// negative; the displayed disc angle damps toward this).
+    pub visual_rotation: f32,
+    /// Score-side rotation (`SpinnerSpinHistory.TotalRotation`), degrees.
+    pub total_rotation: f32,
+    pub tracking: bool,
+}
+
+/// Visual state snapshot of one game frame (60fps frame-stable playback).
+/// Recorded after the stability iterations settle for the frame.
+#[derive(Clone, Debug)]
+pub struct FrameSnap {
+    /// Reference clock time at the end of this game frame.
+    pub time: f64,
+    /// Interpolated cursor position at `time`.
+    pub cursor: Vec2,
+    pub left: bool,
+    pub right: bool,
+    /// Slider tracking states for objects in their visual lifespan.
+    pub sliders: Vec<(usize, bool)>,
+    pub spinners: Vec<SpinnerSnap>,
+}
+
 #[derive(Default)]
 struct SliderRuntime {
     tracking: bool,
@@ -183,6 +210,8 @@ pub struct Engine {
     input_order: Vec<usize>,
 
     pub timeline: Vec<TimelineEntry>,
+    /// Per-game-frame visual snapshots (filled by `run`).
+    pub snapshots: Vec<FrameSnap>,
 }
 
 /// Slider path position at overall slider progress [0..1], mirroring the
@@ -199,6 +228,33 @@ fn path_position_at(obj: &ProcObject, progress: f64) -> Vec2 {
             path.position_at(p)
         }
         _ => Vec2::ZERO,
+    }
+}
+
+/// Interpolated cursor position at time `t` (`FramedReplayInputHandler`
+/// semantics: exact at a consumed frame, linear towards the next otherwise).
+fn interpolate_cursor(frames: &[ReplayFrame], next_frame: usize, t: f64) -> Vec2 {
+    if next_frame > 0 && frames[next_frame - 1].time == t {
+        let f = &frames[next_frame - 1];
+        return Vec2::new(f.position.0, f.position.1);
+    }
+
+    let start_idx = next_frame.saturating_sub(1);
+    let start = &frames[start_idx];
+    match frames.get(next_frame) {
+        Some(end) => {
+            let span = end.time - start.time;
+            if span <= 0.0 {
+                Vec2::new(start.position.0, start.position.1)
+            } else {
+                Vec2::lerp(
+                    Vec2::new(start.position.0, start.position.1),
+                    Vec2::new(end.position.0, end.position.1),
+                    (t - start.time) / span,
+                )
+            }
+        }
+        None => Vec2::new(start.position.0, start.position.1),
     }
 }
 
@@ -280,11 +336,17 @@ impl Engine {
             update_order,
             input_order,
             timeline: Vec::new(),
+            snapshots: Vec::new(),
         }
     }
 
     pub fn objects(&self) -> &[ProcObject] {
         &self.objects
+    }
+
+    /// The OD hit windows (great/ok/meh, ms) used for this run.
+    pub fn windows(&self) -> HitWindows {
+        self.windows
     }
 
     // ------------------------------------------------------------------
@@ -444,6 +506,49 @@ impl Engine {
                     break;
                 }
             }
+
+            // Visual snapshot at the end of the game frame (the state the
+            // draw would present).
+            let cursor = interpolate_cursor(frames, next_frame, reference);
+            let (left, right) = match frames.get(next_frame.saturating_sub(1)) {
+                Some(f) if next_frame > 0 => (f.left, f.right),
+                _ => (false, false),
+            };
+
+            let mut sliders = Vec::new();
+            let mut spinners = Vec::new();
+            for (i, obj) in self.objects.iter().enumerate() {
+                let in_visual_span = reference >= obj.start_time - obj.time_preempt
+                    && reference <= obj.end_time + MISS_WINDOW;
+                if !in_visual_span {
+                    continue;
+                }
+                match &obj.kind {
+                    ProcKind::Slider { .. } => {
+                        sliders.push((i, self.runtime[i].slider.tracking));
+                    }
+                    ProcKind::Spinner { .. } => {
+                        if let Some(rt) = &self.runtime[i].spinner {
+                            spinners.push(SpinnerSnap {
+                                object_index: i,
+                                visual_rotation: rt.total_accumulated_rotation,
+                                total_rotation: rt.total_rotation(),
+                                tracking: rt.tracking,
+                            });
+                        }
+                    }
+                    ProcKind::Circle => {}
+                }
+            }
+
+            self.snapshots.push(FrameSnap {
+                time: reference,
+                cursor,
+                left,
+                right,
+                sliders,
+                spinners,
+            });
         }
     }
 

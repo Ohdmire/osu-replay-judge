@@ -358,6 +358,44 @@ impl SliderPath {
         }
     }
 
+    /// The full piecewise-linear calculated path (`SliderPath.CalculatedPath`).
+    pub fn calculated_path(&self) -> Vec<Vec2> {
+        self.ensure_valid();
+        self.computed.borrow().calculated_path.clone()
+    }
+
+    /// Port of `SliderPath.GetPathToProgress`: the piecewise-linear sub-path
+    /// between progress `p0` and `p1` (both clamped to 0..1). Used for
+    /// rendering snaking slider bodies.
+    pub fn path_to_progress(&self, p0: f64, p1: f64) -> Vec<Vec2> {
+        self.ensure_valid();
+        let computed = self.computed.borrow();
+
+        let total = if computed.cumulative_length.is_empty() {
+            0.0
+        } else {
+            *computed.cumulative_length.last().unwrap()
+        };
+        let d0 = p0.clamp(0.0, 1.0) * total;
+        let d1 = p1.clamp(0.0, 1.0) * total;
+
+        let mut path: Vec<Vec2> = Vec::new();
+
+        let mut i = 0usize;
+        while i < computed.calculated_path.len() && computed.cumulative_length[i] < d0 {
+            i += 1;
+        }
+        path.push(interpolate_vertices(&computed, i, d0));
+
+        while i < computed.calculated_path.len() && computed.cumulative_length[i] <= d1 {
+            path.push(computed.calculated_path[i]);
+            i += 1;
+        }
+
+        path.push(interpolate_vertices(&computed, i, d1));
+        path
+    }
+
     /// Position on the slider path at progress `p` (clamped to 0..1).
     pub fn position_at(&self, progress: f64) -> Vec2 {
         self.ensure_valid();

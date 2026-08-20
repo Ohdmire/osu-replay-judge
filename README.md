@@ -96,3 +96,8 @@ tracking/tail 边缘上仍受更新网格相位影响（±1 帧），其余全�
 lazer 的 `client.realm`，导出 221 对数据库配对的真实谱面+回放到
 `testdata/dbtests/`（含 `manifest.json`：数据库权威的分数/combo/统计）。
 导出器位于该仓库的 `examples/export_tests.rs` 与 `dump_scores.rs`。
+
+## 测试记录
+
+全部测试的方法、测试集、逐事件结果、发现的 14 个 bug 与复现命令，
+见 [TESTING.md](TESTING.md)。

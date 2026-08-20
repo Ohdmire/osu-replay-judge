@@ -82,6 +82,8 @@ pub struct ParsedObject {
     pub raw: RawHitObject,
     /// Slider velocity multiplier from the difficulty point active at start time (decode time).
     pub slider_velocity_multiplier: f64,
+    /// Colour-skip count from the hit object type bits 4-6 (`ComboOffset`).
+    pub combo_offset: u32,
 }
 
 pub struct Beatmap {
@@ -91,6 +93,8 @@ pub struct Beatmap {
     pub timing_points: Vec<TimingPoint>,
     pub difficulty_points: Vec<DifficultyPoint>,
     pub objects: Vec<ParsedObject>,
+    /// Beatmap-defined combo colours from the `[Colours]` section (sRGB 0-255).
+    pub combo_colours: Vec<[u8; 3]>,
 }
 
 /// Rightmost binary search: last point with `time <= t`, else None.
@@ -323,6 +327,7 @@ pub fn decode(content: &str) -> Result<Beatmap, String> {
     let mut timing_points: Vec<TimingPoint> = Vec::new();
     let mut difficulty_points: Vec<DifficultyPoint> = Vec::new();
     let mut objects: Vec<ParsedObject> = Vec::new();
+    let mut combo_colours: Vec<[u8; 3]> = Vec::new();
 
     // pending control point flush state
     let mut pending_time: Option<f64> = None;
@@ -428,9 +433,29 @@ pub fn decode(content: &str) -> Result<Beatmap, String> {
                     new_combo: obj.new_combo,
                     raw: obj.raw,
                     slider_velocity_multiplier: sv,
+                    combo_offset: obj.combo_offset,
                 });
                 first_object = false;
                 last_object_is_spinner = is_spinner;
+            }
+            "Colours" => {
+                // "Combo1 : 255,128,64" (also "Combo" without number).
+                let (key, value) = split_kv(&line);
+                // Split at the first digit to get the alphabetic prefix
+                // ("Combo1" / "Combo2" -> "Combo"); splitting at non-digits
+                // would yield an empty first segment for letter-led keys.
+                let key = key.split(|c: char| c.is_ascii_digit()).next().unwrap_or("").trim().to_string();
+                if key == "Combo" {
+                    let parts: Vec<&str> = value.split(',').collect();
+                    if parts.len() >= 3 {
+                        let rgb = [
+                            parse_i32(parts[0]).clamp(0, 255) as u8,
+                            parse_i32(parts[1]).clamp(0, 255) as u8,
+                            parse_i32(parts[2]).clamp(0, 255) as u8,
+                        ];
+                        combo_colours.push(rgb);
+                    }
+                }
             }
             _ => {
                 if section.is_empty() {
@@ -496,6 +521,7 @@ pub fn decode(content: &str) -> Result<Beatmap, String> {
         timing_points,
         difficulty_points,
         objects,
+        combo_colours,
     })
 }
 
@@ -543,6 +569,7 @@ fn split_kv(line: &str) -> (String, String) {
 struct ParsedLine {
     start_time: f64,
     new_combo: bool,
+    combo_offset: u32,
     raw: RawHitObject,
 }
 
@@ -564,7 +591,7 @@ fn parse_hit_object_line(
 
     let obj_type = parse_i32(split[3]) as u32;
     let combo_flag = obj_type & (1 << 2) != 0;
-    let _combo_offset = (obj_type & (0b111 << 4)) >> 4;
+    let combo_offset = (obj_type & (0b111 << 4)) >> 4;
 
     let new_combo = first_object || last_object_is_spinner || combo_flag;
 
@@ -608,5 +635,5 @@ fn parse_hit_object_line(
         return Err(format!("unknown hit object type: {}", split[3]));
     };
 
-    Ok(ParsedLine { start_time, new_combo, raw })
+    Ok(ParsedLine { start_time, new_combo, combo_offset, raw })
 }
