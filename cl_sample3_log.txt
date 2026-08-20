@@ -1,0 +1,6 @@
+[1/6] score10584 done (36s)
+[2/6] score4206 done (24s)
+[3/6] score4164 done (40s)
+[4/6] score6590 done (41s)
+[5/6] score5317 done (29s)
+[6/6] score0304 done (32s)

@@ -312,7 +312,9 @@ impl Engine {
                 .start_time
                 .partial_cmp(&beatmap.objects[a].start_time)
                 .unwrap()
-                .then(a.cmp(&b))
+                // HitObjectContainer ties: CompareReverseChildID (later-added
+                // draws first in the sorted list, and updates follow it).
+                .then(b.cmp(&a))
         });
 
         let mut input_order: Vec<usize> = (0..beatmap.objects.len()).collect();
