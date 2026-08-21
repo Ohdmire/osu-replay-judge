@@ -16,6 +16,9 @@ pub struct ReplayFrame {
     /// Pressed buttons (left bit0, right bit1; bits 2/3 map to the same buttons).
     pub left: bool,
     pub right: bool,
+    /// Smoke bit (bit 4, `ReplayButtonState.Smoke`; default key C). Not a
+    /// gameplay action, but the key overlay renders it.
+    pub smoke: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -242,8 +245,9 @@ fn parse_frames(blob: &str, beatmap_version: i32) -> Result<(Vec<ReplayFrame>, O
         // ReplayButtonState: Left1=1, Right1=2, Left2=4, Right2=8, Smoke=16.
         let left = buttons & 0b0101 != 0;
         let right = buttons & 0b1010 != 0;
+        let smoke = buttons & 0b10000 != 0;
 
-        frames.push(ReplayFrame { time: last_time, position: (x, y), left, right });
+        frames.push(ReplayFrame { time: last_time, position: (x, y), left, right, smoke });
     }
 
     // Stable replay quirks (LegacyScoreDecoder.readLegacyReplay).

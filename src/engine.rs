@@ -105,6 +105,8 @@ pub struct FrameSnap {
     pub cursor: Vec2,
     pub left: bool,
     pub right: bool,
+    /// Smoke button state (key overlay only; no gameplay effect).
+    pub smoke: bool,
     /// Slider tracking states for objects in their visual lifespan.
     pub sliders: Vec<(usize, bool)>,
     pub spinners: Vec<SpinnerSnap>,
@@ -512,9 +514,9 @@ impl Engine {
             // Visual snapshot at the end of the game frame (the state the
             // draw would present).
             let cursor = interpolate_cursor(frames, next_frame, reference);
-            let (left, right) = match frames.get(next_frame.saturating_sub(1)) {
-                Some(f) if next_frame > 0 => (f.left, f.right),
-                _ => (false, false),
+            let (left, right, smoke) = match frames.get(next_frame.saturating_sub(1)) {
+                Some(f) if next_frame > 0 => (f.left, f.right, f.smoke),
+                _ => (false, false, false),
             };
 
             let mut sliders = Vec::new();
@@ -548,6 +550,7 @@ impl Engine {
                 cursor,
                 left,
                 right,
+                smoke,
                 sliders,
                 spinners,
             });
