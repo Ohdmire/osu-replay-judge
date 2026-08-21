@@ -9,7 +9,7 @@ pub struct Vec2 {
 impl Vec2 {
     pub const ZERO: Vec2 = Vec2 { x: 0.0, y: 0.0 };
 
-    pub fn new(x: f32, y: f32) -> Self {
+    pub const fn new(x: f32, y: f32) -> Self {
         Vec2 { x, y }
     }
 
