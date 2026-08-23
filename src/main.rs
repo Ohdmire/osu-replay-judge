@@ -76,7 +76,7 @@ fn main() {
     };
 
     let difficulty = process::apply_difficulty_mods(map.difficulty, mods.hard_rock, mods.easy);
-    let processed = process::process(&map, difficulty, classic);
+    let processed = process::process(&map, difficulty, classic, mods.hard_rock);
 
     let mut engine = Engine::new(processed, &mods);
     engine.run(&rep.frames);

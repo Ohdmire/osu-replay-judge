@@ -6,13 +6,17 @@ use crate::beatmap::{
     calculate_scale_from_circle_size, difficulty_range, difficulty_range_int, Beatmap, Difficulty,
     RawHitObject,
 };
-use crate::path::SliderPath;
+use crate::path::{PathControlPoint, SliderPath};
 use crate::vec2::Vec2;
 
 pub const OBJECT_RADIUS: f32 = 64.0;
 pub const STACK_DISTANCE: f32 = 3.0;
 pub const BASE_SCORING_DISTANCE: f64 = 100.0;
 pub const TAIL_LENIENCY: f64 = -36.0;
+
+/// `OsuPlayfield.BASE_SIZE.Y`: HR reflects objects along the playfield
+/// (`OsuHitObjectGenerationUtils.ReflectVerticallyAlongPlayfield`).
+const PLAYFIELD_BASE_HEIGHT: f32 = 384.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NestedKind {
@@ -104,19 +108,32 @@ pub fn apply_difficulty_mods(mut difficulty: Difficulty, hard_rock: bool, easy: 
         difficulty.ar = (difficulty.ar * 1.4).min(10.0);
     }
 
-    // ModEasy.ApplyToDifficulty.
+    // ModEasy.ApplyToDifficulty (base: CS/AR/HP) + OsuModEasy override (OD).
     if easy {
         difficulty.cs *= 0.5;
         difficulty.ar *= 0.5;
         difficulty.hp *= 0.5;
+        difficulty.od *= 0.5;
     }
 
     difficulty
 }
 
-pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behaviour: bool) -> ProcessedBeatmap {
+pub fn process(
+    beatmap: &Beatmap,
+    difficulty: Difficulty,
+    classic_slider_behaviour: bool,
+    hard_rock: bool,
+) -> ProcessedBeatmap {
     // Stage 1: object defaults (ApplyDefaults) - preempt, scale, slider
     // velocity/ticks, spinner requirements.
+    //
+    // HR's vertical reflection (`OsuModHardRock.ApplyToHitObject`) runs in
+    // lazer after ApplyDefaults and before stacking; here it is folded into
+    // the same pass, which is numerically equivalent: reflection preserves
+    // path length (so velocity/tick times/duration are unchanged) and no
+    // default depends on position. Stacking (stage 2) still sees mirrored
+    // positions, matching lazer.
     let mut objects: Vec<ProcObject> = Vec::with_capacity(beatmap.objects.len());
 
     for obj in &beatmap.objects {
@@ -126,11 +143,18 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
 
         match &obj.raw {
             RawHitObject::Circle { pos } => {
+                // ReflectVerticallyAlongPlayfield (spinners are centre-fixed,
+                // so the reflection is a no-op there).
+                let pos = if hard_rock {
+                    Vec2::new(pos.x, PLAYFIELD_BASE_HEIGHT - pos.y)
+                } else {
+                    *pos
+                };
                 objects.push(ProcObject {
                     start_time: obj.start_time,
                     end_time: obj.start_time,
-                    position: *pos,
-                    end_position: *pos,
+                    position: pos,
+                    end_position: pos,
                     stack_height: 0,
                     scale,
                     radius,
@@ -142,6 +166,26 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
                 });
             }
             RawHitObject::Slider { pos, path, repeat_count } => {
+                // HR: reflect head Y (`Position = (X, BASE_SIZE.Y - Y)`) and
+                // negate slider control-point Ys (`reflectControlPoint`),
+                // rebuilding the path — `modifySlider` in lazer.
+                let pos = if hard_rock {
+                    Vec2::new(pos.x, PLAYFIELD_BASE_HEIGHT - pos.y)
+                } else {
+                    *pos
+                };
+                let control_points = if hard_rock {
+                    path.control_points
+                        .iter()
+                        .map(|cp| PathControlPoint {
+                            position: Vec2::new(cp.position.x, -cp.position.y),
+                            kind: cp.kind,
+                        })
+                        .collect()
+                } else {
+                    path.control_points.clone()
+                };
+
                 let timing_point = beatmap.timing_point_at(obj.start_time);
 
                 // GetPrecisionAdjustedBeatLength (osu branch).
@@ -168,7 +212,7 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
                 };
 
                 let path = SliderPath::new(
-                    path.control_points.clone(),
+                    control_points,
                     path.expected_distance,
                 );
                 let distance = path.distance();
@@ -185,12 +229,12 @@ pub fn process(beatmap: &Beatmap, difficulty: Difficulty, classic_slider_behavio
                 if end_span % 2 == 1 {
                     end_p = 1.0 - end_p;
                 }
-                let end_position = *pos + path.position_at(end_p);
+                let end_position = pos + path.position_at(end_p);
 
                 objects.push(ProcObject {
                     start_time: obj.start_time,
                     end_time: obj.start_time + duration,
-                    position: *pos,
+                    position: pos,
                     end_position,
                     stack_height: 0,
                     scale,
@@ -547,5 +591,104 @@ fn apply_stacking_old(objects: &mut [ProcObject], stack_leniency: f32) {
                 start_time = objects[j].start_time;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::beatmap::{Beatmap, Difficulty, DifficultyPoint, ParsedObject, TimingPoint};
+    use crate::path::{PathControlPoint, PathType};
+
+    fn test_beatmap() -> Beatmap {
+        Beatmap {
+            version: 14,
+            stack_leniency: 0.7,
+            difficulty: Difficulty::default(),
+            timing_points: vec![TimingPoint { time: 0.0, beat_length: 500.0 }],
+            difficulty_points: vec![DifficultyPoint {
+                time: 0.0,
+                slider_velocity: 1.0,
+                generate_ticks: true,
+            }],
+            objects: vec![
+                ParsedObject {
+                    start_time: 1000.0,
+                    new_combo: true,
+                    raw: RawHitObject::Circle { pos: Vec2::new(200.0, 100.0) },
+                    slider_velocity_multiplier: 1.0,
+                    combo_offset: 0,
+                },
+                ParsedObject {
+                    start_time: 2000.0,
+                    new_combo: true,
+                    raw: RawHitObject::Slider {
+                        pos: Vec2::new(100.0, 100.0),
+                        path: SliderPath::new(
+                            vec![
+                                PathControlPoint { position: Vec2::ZERO, kind: Some(PathType::LINEAR) },
+                                PathControlPoint { position: Vec2::new(100.0, 50.0), kind: None },
+                            ],
+                            None,
+                        ),
+                        repeat_count: 0,
+                    },
+                    slider_velocity_multiplier: 1.0,
+                    combo_offset: 0,
+                },
+            ],
+            combo_colours: Vec::new(),
+        }
+    }
+
+    /// `OsuModHardRock.ApplyToHitObject` -> `ReflectVerticallyAlongPlayfield`:
+    /// head `Y -> BASE_SIZE.Y - Y`, slider control points `Y -> -Y` (path
+    /// rebuilt), end position follows.
+    #[test]
+    fn hard_rock_reflects_objects_vertically() {
+        let map = test_beatmap();
+        let processed = process(&map, map.difficulty, false, true);
+
+        let circle = &processed.objects[0];
+        assert_eq!(circle.position, Vec2::new(200.0, 384.0 - 100.0));
+
+        let slider = &processed.objects[1];
+        assert_eq!(slider.position, Vec2::new(100.0, 384.0 - 100.0));
+        match &slider.kind {
+            ProcKind::Slider { path, .. } => {
+                assert_eq!(path.control_points[1].position, Vec2::new(100.0, -50.0));
+            }
+            _ => panic!("expected slider"),
+        }
+        // Original end (200, 150) reflects to (200, 234).
+        assert_eq!(slider.end_position, Vec2::new(200.0, 384.0 - 150.0));
+    }
+
+    #[test]
+    fn without_hard_rock_positions_are_unchanged() {
+        let map = test_beatmap();
+        let processed = process(&map, map.difficulty, false, false);
+
+        assert_eq!(processed.objects[0].position, Vec2::new(200.0, 100.0));
+        match &processed.objects[1].kind {
+            ProcKind::Slider { path, .. } => {
+                assert_eq!(path.control_points[1].position, Vec2::new(100.0, 50.0));
+            }
+            _ => panic!("expected slider"),
+        }
+    }
+
+    /// `ModEasy` halves CS/AR/HP, `OsuModEasy` additionally halves OD.
+    #[test]
+    fn easy_halves_all_difficulty_values() {
+        let d = apply_difficulty_mods(
+            Difficulty { hp: 6.0, cs: 5.0, od: 8.0, ar: 9.0, ..Difficulty::default() },
+            false,
+            true,
+        );
+        assert_eq!(d.cs, 2.5);
+        assert_eq!(d.ar, 4.5);
+        assert_eq!(d.hp, 3.0);
+        assert_eq!(d.od, 4.0);
     }
 }
