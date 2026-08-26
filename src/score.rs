@@ -394,7 +394,14 @@ impl ScoreProcessor {
             }
 
             event_count += 1;
-            let current_value = e.time_offset / e.gameplay_rate;
+            // `HitEventExtensions.CalculateUnstableRate` divides by the
+            // gameplay rate "to account for TimeOffset scaling with
+            // gameplay rate" — lazer's TimeOffset lives on the
+            // rate-adjusted clock. This engine's offsets are already map
+            // time (the rate-adjusted value divided by the rate), so the
+            // division is pre-applied; dividing again would normalise
+            // twice (UR off by exactly the rate on DT/HT replays).
+            let current_value = e.time_offset;
             let next_mean = mean + (current_value - mean) / event_count as f64;
             sum_of_squares += (current_value - mean) * (current_value - next_mean);
             mean = next_mean;
