@@ -463,8 +463,16 @@ impl Engine {
         // itself), consumes at most one replay frame (updating at its exact
         // time), otherwise updates at the frame-span-clamped proposal. The loop
         // repeats while the manual clock is still behind the reference.
-        let mut reference = gameplay_start;
-        let mut manual = gameplay_start;
+        // Align the 60Hz reference grid to map-time zero (phase-0
+        // lattice). The grid phase decides which instents get evaluated,
+        // and threshold-gated judgements (slider tails inside the -36ms
+        // leniency with the cursor leaving the follow circle in the same
+        // few ms) are phase-sensitive: the phase must be canonical to
+        // match lazer's clock lattice, whose frames tick at multiples of
+        // 1000/60 from zero.
+        let grid_start = (gameplay_start / SIXTY_FRAME_TIME).ceil() * SIXTY_FRAME_TIME;
+        let mut reference = grid_start;
+        let mut manual = grid_start;
         let mut next_frame = 0usize;
         let mut ticks: u64 = 0;
 
@@ -1065,7 +1073,6 @@ impl Engine {
     fn slider_update(&mut self, obj_idx: usize, t: f64) {
         // SliderInputManager.Update -> updateTracking
         self.update_tracking(obj_idx, t);
-
         // Nested updates in drawable container order (ticks, repeats, tail, head).
         let container_order = self.runtime[obj_idx].container_order.clone();
         for nested_idx in container_order {
@@ -1172,7 +1179,6 @@ impl Engine {
         }
 
         let tracking = self.runtime[obj_idx].slider.tracking;
-
         if tracking {
             self.nested_hit_forcefully(obj_idx, nested_idx, t);
         } else if time_offset >= 0.0 {
@@ -1461,8 +1467,15 @@ impl Engine {
         self.score
             .apply_result(judgement, result, t, event_offset, has_windows, self.rate);
 
+        // `JudgementResult.TimeAbsolute`: min(RawTime, GetEndTime() +
+        // MaximumJudgementOffset). `event_offset` is already that clamped
+        // delta, so end + event_offset reproduces lazer's recorded
+        // timestamp (late frame-evaluated results stamp at the clamp).
+        // Spinner ticks are exempt: their MaximumJudgementOffset is the
+        // whole spinner duration (the clamp never binds there), and they
+        // fire at the actual full-rotation moment, not the grid.
         let entry = TimelineEntry {
-            time: t,
+            time: if label == "stick" || label == "smax" { t } else { end_time + event_offset },
             object_index: obj_idx,
             label: label.to_string(),
             result,
