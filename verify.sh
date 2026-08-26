@@ -47,6 +47,18 @@ for rep in sorted(glob.glob(os.path.expanduser('~/下载/*.osr'))):
     m = bm.get(md5)
     if not m: continue
     entries.append((os.path.basename(rep), m, rep, ver))
+# The osu-eyes cache (md5-named replays against the cached beatmaps) and
+# the osu-learning generated set.
+for rep in sorted(glob.glob(os.path.expanduser('~/文档/GitHub/osu-eyes/cache/replays/*.osr'))):
+    ver,md5 = header(rep)
+    m = bm.get(md5)
+    if not m: continue
+    entries.append((os.path.basename(rep), m, rep, ver))
+for rep in sorted(glob.glob(os.path.expanduser('~/文档/GitHub/osu-learning/output/generated_osr/*.osr'))):
+    ver,md5 = header(rep)
+    m = bm.get(md5)
+    if not m: continue
+    entries.append((os.path.basename(rep), m, rep, ver))
 os.makedirs('verify_work', exist_ok=True)
 seen=set(); batch=[]
 for name, m, rep, ver in entries:
