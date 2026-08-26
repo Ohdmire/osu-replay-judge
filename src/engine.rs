@@ -1269,7 +1269,21 @@ impl Engine {
             let tick_count = spinner_tick_count(&self.objects[obj_idx]);
             while rt.completed_full_spins != spins {
                 if rt.next_tick >= tick_count {
-                    // Hit the spin limit - no more ticks.
+                    // Hit the spin limit - no more ticks. lazer plays
+                    // `maxBonusSample` here (a sound with NO score event);
+                    // emit a timeline marker so renderers can sound it too.
+                    self.timeline.push(TimelineEntry {
+                        time: t,
+                        object_index: obj_idx,
+                        label: "smax".to_string(),
+                        result: HitResult::IgnoreHit,
+                        combo: self.score.combo,
+                        score: self.score.total_score(),
+                        classic_score: self.score.classic_display_score(),
+                        accuracy: self.score.accuracy(),
+                        unstable_rate: self.score.unstable_rate(),
+                        time_offset: 0.0,
+                    });
                     rt.completed_full_spins += 1;
                     continue;
                 }
