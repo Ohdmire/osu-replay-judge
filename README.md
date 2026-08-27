@@ -90,12 +90,19 @@ osu-framework），包括浮点类型与运算顺序（f32 向量、f64 时间�
 - **计分**：`ScoreProcessor` 全状态机（combo、acc、bonus/combo 部分进度、
   自动演奏最大值模拟）、银行家舍入、V2 mod 倍率、UR（Welford 在线算法，
   按游玩速率折算）
-- **血量**：`HealthProcessor` + `DrainingHealthProcessor` +
-  `OsuHealthProcessor` 移植（`health.rs`）——DR 相关扣血表、combo 尾
-  Perfect/Good +0.07/0.05/0.03 加成（`ComboResult` 逐判定降级）、beat
-  break 段无 drain（`PeriodTracker` 语义：break 扩到前后物件间隙）、
-  满血模拟解 drain rate（最低血 0.99/0.9/0.4@HP0/5/10 目标二分逼近）、
-  输出逐判定 HP 曲线 + drain 窗口供下游任意时刻重建
+- **血量**：两条处理器路径按模式分叉（`health.rs`），与 lazer 的
+  处理器选择一致——
+  - **lazer 模式**：`HealthProcessor` + `DrainingHealthProcessor` +
+    `OsuHealthProcessor`——DR 相关扣血表、combo 尾 Perfect/Good
+    +0.07/0.05/0.03 加成（`ComboResult` 逐判定降级）、beat break 段无
+    drain（`PeriodTracker` 语义：break 扩到前后物件间隙）、满血模拟解
+    drain rate（最低血 0.99/0.9/0.4@HP0/5/10 目标二分逼近）；
+  - **classic 模式**（stable 回放 => `ModClassic` "Classic health" 默认
+    开）：`OsuLegacyHealthProcessor` → `LegacyDrainingHealthProcessor`
+    ——stable 风格迭代 `testDrop` solver（0.00025 起步、四个 fail 条件
+    ×0.96/×0.94 自适应、`HpMultiplierNormal` ×1.01 收敛），实况扣血
+    乘该系数且**无 combo 尾加成**（`CreateHealthProcessor` 换处理器）；
+  - 两者都输出逐判定 HP 曲线 + drain 窗口供下游任意时刻重建。
 
 ## 模块结构
 

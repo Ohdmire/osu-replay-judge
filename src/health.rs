@@ -159,6 +159,121 @@ pub fn compute_drain_rate(
     result
 }
 
+/// One top-level object for the legacy solver: its drain-relevant span,
+/// the health increases of its nested judgements (max results, at the
+/// object's own multipliers), and the top-level object's own increase.
+pub struct LegacyObject {
+    pub start: f64,
+    pub end: f64,
+    /// Nested increases, in nested order (spinner bonus ticks excluded -
+    /// `OsuLegacyHealthProcessor.EnumerateNestedHitObjects`).
+    pub nested: Vec<f64>,
+    /// The top-level object's own max-result increase (the classic slider
+    /// body is judged Great at the end; a non-classic body would be
+    /// IgnoreHit = 0).
+    pub own: f64,
+}
+
+/// `LegacyDrainingHealthProcessor.ComputeDrainRate` - the stable-style
+/// iterative solver used by `ModClassic` ("Classic health" default on):
+/// a per-object walk draining `testDrop` before each object's start and
+/// across its duration, with four fail conditions easing the drop and
+/// adapting `HpMultiplierNormal`. Returns `(drain_rate, hp_multiplier)` -
+/// the multiplier applies to LIVE increases too (the real playthrough's
+/// `Reset(false)` never recomputes it).
+pub fn compute_drain_rate_legacy(
+    objects: &[LegacyObject],
+    drain_start: f64,
+    breaks: &[(f64, f64)],
+    hp_drain: f64,
+) -> (f64, f64) {
+    let lowest_hp_ever = difficulty_range(hp_drain, 0.975, 0.8, 0.3);
+    let lowest_hp_end = difficulty_range(hp_drain, 0.99, 0.9, 0.4);
+    let hp_recovery_available = difficulty_range(hp_drain, 0.04, 0.02, 0.0);
+
+    let mut breaks: Vec<(f64, f64)> = breaks.to_vec();
+    breaks.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+
+    let mut test_drop = 0.00025f64;
+    let mut multiplier = 1.0f64;
+
+    loop {
+        let (mut current_hp, mut current_hp_uncapped) = (1.0f64, 1.0f64);
+        let mut lowest_hp = 1.0f64;
+        let mut last_time = drain_start;
+        let mut current_break = 0usize;
+        let mut fail = false;
+
+        for obj in objects {
+            while current_break < breaks.len() && breaks[current_break].1 <= obj.start {
+                // Objects separated by a break: no drain between them.
+                last_time = obj.start;
+                current_break += 1;
+            }
+
+            let pre = test_drop * (obj.start - last_time);
+            current_hp_uncapped = (current_hp_uncapped - pre).max(0.0);
+            current_hp = (current_hp - pre).max(0.0);
+            last_time = obj.end;
+
+            lowest_hp = lowest_hp.min(current_hp);
+            if current_hp <= lowest_hp_ever {
+                fail = true;
+                test_drop *= 0.96;
+                break;
+            }
+
+            let hp_reduction = test_drop * (obj.end - obj.start);
+            let hp_overkill = (hp_reduction - current_hp).max(0.0);
+            current_hp_uncapped = (current_hp_uncapped - hp_reduction).max(0.0);
+            current_hp = (current_hp - hp_reduction).max(0.0);
+
+            for &amount in &obj.nested {
+                current_hp_uncapped += multiplier * amount;
+                current_hp = (current_hp + multiplier * amount).clamp(0.0, 1.0);
+            }
+
+            // Long sliders / spinners overkill at lower drain levels than
+            // they should (HP capped during the increases above).
+            if hp_overkill > 0.0 && current_hp - hp_overkill <= lowest_hp_ever {
+                fail = true;
+                test_drop *= 0.96;
+                break;
+            }
+
+            current_hp_uncapped += multiplier * obj.own;
+            current_hp = (current_hp + multiplier * obj.own).clamp(0.0, 1.0);
+        }
+
+        if objects.is_empty() {
+            return (test_drop, multiplier);
+        }
+
+        if !fail && current_hp < lowest_hp_end {
+            fail = true;
+            test_drop *= 0.94;
+            multiplier *= 1.01;
+        }
+
+        let recovery = (current_hp_uncapped - 1.0) / (objects.len() as f64).max(1.0);
+        if !fail && recovery < hp_recovery_available {
+            fail = true;
+            test_drop *= 0.96;
+            multiplier *= 1.01;
+        }
+
+        if !fail && multiplier.is_infinite() {
+            // Diverged to infinity: pass with zero drain.
+            multiplier = 1.0;
+            return (0.0, multiplier);
+        }
+
+        if !fail {
+            return (test_drop, multiplier);
+        }
+    }
+}
+
 /// Drainable time across `[a, b]`: the drain window minus every no-drain
 /// period (lazer drains per Update frame with the frame clamped into the
 /// drain window, and skips frames inside a no-drain period entirely).
