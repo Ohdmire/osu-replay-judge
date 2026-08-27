@@ -7,9 +7,9 @@
 用 Rust 独立实现的 osu!standard 模式回放判定模拟器，以 [osu!lazer](https://github.com/ppy/osu)（2025-08 master）为参照，逐事件复刻其判定语义。
 
 给定一张 `.osu` 谱面和一个 `.osr` 回放，输出**每一时刻**的判定事件流：
-分数、combo、acc、unstable rate —— 与游戏内观看该回放时的 ScoreProcessor
-状态一致。无任何 C# 运行时依赖，单回放 0.04~1.2s（比无头驱动 C# 原版快
-75~390 倍）。
+分数、combo、acc、unstable rate、HP 血量 —— 与游戏内观看该回放时的
+ScoreProcessor / HealthProcessor 状态一致。无任何 C# 运行时依赖，单回放
+0.04~1.2s（比无头驱动 C# 原版快 75~390 倍）。
 
 ## 用法
 
@@ -90,6 +90,12 @@ osu-framework），包括浮点类型与运算顺序（f32 向量、f64 时间�
 - **计分**：`ScoreProcessor` 全状态机（combo、acc、bonus/combo 部分进度、
   自动演奏最大值模拟）、银行家舍入、V2 mod 倍率、UR（Welford 在线算法，
   按游玩速率折算）
+- **血量**：`HealthProcessor` + `DrainingHealthProcessor` +
+  `OsuHealthProcessor` 移植（`health.rs`）——DR 相关扣血表、combo 尾
+  Perfect/Good +0.07/0.05/0.03 加成（`ComboResult` 逐判定降级）、beat
+  break 段无 drain（`PeriodTracker` 语义：break 扩到前后物件间隙）、
+  满血模拟解 drain rate（最低血 0.99/0.9/0.4@HP0/5/10 目标二分逼近）、
+  输出逐判定 HP 曲线 + drain 窗口供下游任意时刻重建
 
 ## 模块结构
 
@@ -102,6 +108,7 @@ src/
 ├── replay.rs    .osr 二进制 + LZMA 解压、帧修正
 ├── engine.rs    判定引擎（帧稳定主循环、hit policy、tracking、spinner）
 ├── score.rs     ScoreProcessor（分数/combo/acc/UR）+ classic 显示分
+├── health.rs    HealthProcessor（扣血表/combo尾加成/break/drain rate 求解）
 └── mods.rs      legacy mod 位、V2 倍率、速率
 ```
 

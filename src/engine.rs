@@ -201,6 +201,15 @@ pub struct Engine {
     windows: HitWindows,
     classic: bool,
     rate: f64,
+    /// Beatmap HP drain rate (`Difficulty.HPDrainRate`, modded) - drives
+    /// the miss-amount table and the drain-rate solver target.
+    hp_drain: f64,
+    /// `[Events]` break periods (`DrainingHealthProcessor` no-drain input).
+    breaks: Vec<(f64, f64)>,
+    /// `IHasComboInformation.LastInCombo` per object: the NEXT object
+    /// starts a new combo (`UpdateComboInformation` marks the previous
+    /// one). The final object never gets it (nothing follows).
+    last_in_combo: Vec<bool>,
     pub score: ScoreProcessor,
 
     runtime: Vec<ObjectRuntime>,
@@ -214,6 +223,8 @@ pub struct Engine {
     pub timeline: Vec<TimelineEntry>,
     /// Per-game-frame visual snapshots (filled by `run`).
     pub snapshots: Vec<FrameSnap>,
+    /// Health processor output (filled at the end of `run`).
+    pub health: crate::health::HealthInfo,
 }
 
 /// Slider path position at overall slider progress [0..1], mirroring the
@@ -328,11 +339,18 @@ impl Engine {
                 .then(a.cmp(&b))
         });
 
+        let last_in_combo: Vec<bool> = (0..beatmap.objects.len())
+            .map(|i| beatmap.objects.get(i + 1).is_some_and(|next| next.new_combo))
+            .collect();
+
         Engine {
             objects: beatmap.objects,
             windows,
             classic: mods.classic,
             rate: mods.rate,
+            hp_drain: beatmap.difficulty.hp as f64,
+            breaks: beatmap.breaks,
+            last_in_combo,
             score: ScoreProcessor::new(mods.score_multiplier_v2()),
             runtime,
             cursor: Vec2::new(256.0, 192.0),
@@ -341,6 +359,7 @@ impl Engine {
             input_order,
             timeline: Vec::new(),
             snapshots: Vec::new(),
+            health: crate::health::HealthInfo::default(),
         }
     }
 
@@ -563,6 +582,11 @@ impl Engine {
                 spinners,
             });
         }
+
+        // Health processor pass (`HealthProcessor` + `DrainingHealthProcessor`
+        // + `OsuHealthProcessor`): drain rate solved off the perfect-play
+        // simulation, then the live timeline walked into an HP curve.
+        self.health = self.build_health();
     }
 
     /// Runs one update at `update_time`; `next_frame` is the index of the next
@@ -1487,6 +1511,169 @@ impl Engine {
             time_offset,
         };
         self.timeline.push(entry);
+    }
+
+    /// `HealthProcessor` pass (`DrainingHealthProcessor` +
+    /// `OsuHealthProcessor`): solves the drain rate off a perfect-play
+    /// increase list (mirroring `SimulateAutoplay`'s enumeration -
+    /// nested first, then the object itself, max results, bonus results
+    /// excluded from the collection), then walks the live timeline
+    /// applying the health-increase table with the combo-end bonus and
+    /// the fail condition.
+    fn build_health(&self) -> crate::health::HealthInfo {
+        use crate::health as h;
+
+        let drain_start = self.objects.first().map(|o| o.start_time).unwrap_or(0.0);
+        let drain_end = self.objects.last().map(|o| o.end_time).unwrap_or(0.0);
+
+        // No-drain periods: `PeriodTracker` over `beatmap.Breaks` - each
+        // break widens to the surrounding object gap
+        // (`[last object end <= break.start, first object start >= break.end]`).
+        let mut no_drain: Vec<(f64, f64)> = Vec::new();
+        for &(b0, b1) in &self.breaks {
+            let p0 = self
+                .objects
+                .iter()
+                .map(|o| o.end_time)
+                .filter(|&t| t <= b0)
+                .fold(f64::NEG_INFINITY, f64::max);
+            let p1 = self
+                .objects
+                .iter()
+                .map(|o| o.start_time)
+                .filter(|&t| t >= b1)
+                .fold(f64::INFINITY, f64::min);
+            no_drain.push((p0, p1));
+        }
+
+        let mut info = crate::health::HealthInfo {
+            drain_start,
+            drain_end,
+            no_drain,
+            ..Default::default()
+        };
+
+        // Perfect-play increase list for the solver. `JudgementProcessor
+        // .SimulateAutoplay` enumerates nested objects BEFORE their parent,
+        // applying each judgement's MaxResult; `DrainingHealthProcessor
+        // .ApplyResultInternal` collects every non-bonus result's health
+        // increase at `GetEndTime()` (TimeOffset 0 in the simulation).
+        let mut sim: Vec<(f64, f64)> = Vec::new();
+        for (i, obj) in self.objects.iter().enumerate() {
+            match &obj.kind {
+                ProcKind::Slider { nested, .. } => {
+                    for n in nested {
+                        let result = match n.kind {
+                            NestedKind::Head => {
+                                if self.classic {
+                                    HitResult::LargeTickHit
+                                } else {
+                                    HitResult::Great
+                                }
+                            }
+                            NestedKind::Tick | NestedKind::Repeat => HitResult::LargeTickHit,
+                            NestedKind::Tail => {
+                                if self.classic {
+                                    HitResult::SmallTickHit
+                                } else {
+                                    HitResult::SliderTailHit
+                                }
+                            }
+                        };
+                        let is_tick = n.kind == NestedKind::Tick;
+                        if !h::is_bonus(result) {
+                            sim.push((n.time, h::increase_for(result, is_tick, self.hp_drain)));
+                        }
+                    }
+                    // The slider's own (body) judgement closes the object.
+                    let (judgement, _) = self.judgement_for(i, None);
+                    if !h::is_bonus(judgement.max_result) {
+                        sim.push((obj.end_time, h::increase_for(judgement.max_result, false, self.hp_drain)));
+                    }
+                }
+                ProcKind::Spinner { .. } => {
+                    // Spinner bonus ticks are bonus results (excluded from
+                    // the solver collection); the spinner itself is judged
+                    // Great at its end.
+                    sim.push((obj.end_time, h::increase_for(HitResult::Great, false, self.hp_drain)));
+                }
+                ProcKind::Circle => {
+                    sim.push((obj.start_time, h::increase_for(HitResult::Great, false, self.hp_drain)));
+                }
+            }
+        }
+
+        info.drain_rate = h::compute_drain_rate(
+            &sim,
+            drain_start,
+            &self.breaks,
+            h::target_minimum_health(self.hp_drain),
+        );
+
+        // Live playthrough: drain integrates between judgements (clamped
+        // at 0 like the health bindable), then each increase applies
+        // through `OsuHealthProcessor.GetHealthIncreaseFor` - the running
+        // `ComboResult` degrades per result type on every object carrying
+        // combo info, resets on NewCombo objects, and the bonus applies on
+        // top-level (`LastInCombo`) hit judgements.
+        let mut events: Vec<(f64, f64)> = Vec::with_capacity(self.timeline.len());
+        let mut hp = 1.0f64;
+        let mut prev_t = drain_start;
+        let mut combo_result = 2u8; // ComboResult: None=0 < Good=1 < Perfect=2
+        let mut failed = false;
+
+        for e in &self.timeline {
+            hp = (hp - info.drain_rate * h::drain_span(&info, prev_t, e.time)).max(0.0);
+            prev_t = e.time;
+
+            let is_tick = e.label.starts_with("tick");
+            let mut amount = h::increase_for(e.result, is_tick, self.hp_drain);
+
+            if e.label != "smax" {
+                let obj = &self.objects[e.object_index];
+                if obj.new_combo {
+                    combo_result = 2;
+                }
+                match e.result {
+                    HitResult::LargeTickMiss | HitResult::Ok => combo_result = combo_result.min(1),
+                    HitResult::Meh | HitResult::Miss => combo_result = combo_result.min(0),
+                    _ => {}
+                }
+                // The slider-tail miss is a special judgement that degrades
+                // to Good.
+                if e.label == "tail" && !hit_result_ext::is_hit(e.result) {
+                    combo_result = combo_result.min(1);
+                }
+                // `combo.LastInCombo` is only ever set on TOP-LEVEL objects
+                // (`UpdateComboInformation` marks the previous top-level
+                // object; nested slider pieces keep the default false), so
+                // the bonus fires on circle/slider-body/spinner judgements
+                // only.
+                if matches!(e.label.as_str(), "circle" | "spinner")
+                    && self.last_in_combo.get(e.object_index).copied().unwrap_or(false)
+                    && hit_result_ext::is_hit(e.result)
+                {
+                    amount += match combo_result {
+                        2 => 0.07,
+                        1 => 0.05,
+                        _ => 0.03,
+                    };
+                }
+            }
+
+            hp = (hp + amount).clamp(0.0, 1.0);
+
+            // `CheckDefaultFailCondition` (bonus results exempt).
+            if hp <= 0.0 && !h::is_bonus(e.result) && e.result != HitResult::IgnoreHit {
+                failed = true;
+            }
+
+            events.push((e.time, hp));
+        }
+
+        info.events = events;
+        info.failed = failed;
+        info
     }
 }
 

@@ -1,5 +1,6 @@
 pub mod beatmap;
 pub mod engine;
+pub mod health;
 pub mod mods;
 pub mod path;
 pub mod process;

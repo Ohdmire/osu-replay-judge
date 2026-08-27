@@ -95,6 +95,9 @@ impl ProcObject {
 pub struct ProcessedBeatmap {
     pub difficulty: Difficulty,
     pub objects: Vec<ProcObject>,
+    /// `[Events]` break periods, carried through for the health
+    /// processor's no-drain periods (`DrainingHealthProcessor`).
+    pub breaks: Vec<(f64, f64)>,
 }
 
 /// Applies difficulty mods to a copy of the difficulty
@@ -317,7 +320,7 @@ pub fn process(
 
     let _ = classic_slider_behaviour;
 
-    ProcessedBeatmap { difficulty, objects }
+    ProcessedBeatmap { difficulty, objects, breaks: beatmap.breaks.clone() }
 }
 
 /// Port of `SliderEventGenerator.Generate` (skipping LegacyLastTick).
@@ -638,6 +641,7 @@ mod tests {
                 },
             ],
             combo_colours: Vec::new(),
+            breaks: Vec::new(),
         }
     }
 

@@ -95,6 +95,10 @@ pub struct Beatmap {
     pub objects: Vec<ParsedObject>,
     /// Beatmap-defined combo colours from the `[Colours]` section (sRGB 0-255).
     pub combo_colours: Vec<[u8; 3]>,
+    /// `[Events]` break periods (`2,start,end`; end clamped to >= start),
+    /// in file order - `LegacyBeatmapDecoder`'s `LegacyEventType.Break`.
+    /// The health processor skips draining across these.
+    pub breaks: Vec<(f64, f64)>,
 }
 
 /// Rightmost binary search: last point with `time <= t`, else None.
@@ -328,6 +332,7 @@ pub fn decode(content: &str) -> Result<Beatmap, String> {
     let mut difficulty_points: Vec<DifficultyPoint> = Vec::new();
     let mut objects: Vec<ParsedObject> = Vec::new();
     let mut combo_colours: Vec<[u8; 3]> = Vec::new();
+    let mut breaks: Vec<(f64, f64)> = Vec::new();
 
     // pending control point flush state
     let mut pending_time: Option<f64> = None;
@@ -457,6 +462,18 @@ pub fn decode(content: &str) -> Result<Beatmap, String> {
                     }
                 }
             }
+            "Events" => {
+                // "2,start,end" (break period). `LegacyBeatmapDecoder`'s
+                // `LegacyEventType.Break`: end clamps to >= start. Only the
+                // break event matters to judgement; sprite/text events are
+                // skipped.
+                let split: Vec<&str> = line.split(',').collect();
+                if split.first().map(|s| s.trim()) == Some("2") && split.len() >= 3 {
+                    let start = parse_f64(split[1]);
+                    let end = parse_f64(split[2]).max(start);
+                    breaks.push((start, end));
+                }
+            }
             _ => {
                 if section.is_empty() {
                     // File header: "osu file format vN".
@@ -522,6 +539,7 @@ pub fn decode(content: &str) -> Result<Beatmap, String> {
         difficulty_points,
         objects,
         combo_colours,
+        breaks,
     })
 }
 
