@@ -36,6 +36,9 @@ pub struct ReplayHeader {
     pub total_score: i32,
     pub max_combo: u16,
     pub mods: u32,
+    /// Raw Windows FILETIME ticks (100 ns since 0001-01-01) for when the
+    /// score was set, exactly as stored in the .osr header.
+    pub timestamp: u64,
 }
 
 struct Reader<'a> {
@@ -163,7 +166,7 @@ pub fn decode(data: &[u8], beatmap_version: i32) -> Result<Replay, String> {
     let _perfect = r.bool()?;
     let mods = r.u32()?;
     let _hp_graph = r.string()?;
-    let _timestamp = r.u64()?;
+    let timestamp = r.u64()?;
 
     let compressed = r.byte_array()?;
 
@@ -190,6 +193,7 @@ pub fn decode(data: &[u8], beatmap_version: i32) -> Result<Replay, String> {
         total_score,
         max_combo,
         mods,
+        timestamp,
     };
 
     if game_mode != 0 {
