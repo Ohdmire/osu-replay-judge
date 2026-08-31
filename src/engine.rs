@@ -81,6 +81,14 @@ pub struct TimelineEntry {
     pub accuracy: f64,
     pub unstable_rate: Option<f64>,
     pub time_offset: f64,
+    /// Engine cursor at the instant this entry was produced. For
+    /// press-dispatched hits this is the consumed replay frame's exact
+    /// recorded position (lazer `CursorPositionAtHit`); for
+    /// time-triggered judgements it is the same interpolated cursor the
+    /// judgement itself saw. Position consumers (results `AccuracyHeatmap`,
+    /// `AimErrorMeter`) must use this, not a re-interpolation off the
+    /// visual snapshots.
+    pub cursor: Vec2,
 }
 
 /// Visual state snapshot of one spinner, recorded per game frame.
@@ -221,6 +229,11 @@ pub struct Engine {
     input_order: Vec<usize>,
 
     pub timeline: Vec<TimelineEntry>,
+    /// Every button press as `(time, cursor)` — the consumed replay
+    /// frame's exact recorded position at the rising edge (lazer
+    /// `HitReceptor` press events; smoke excluded). Feeds the
+    /// `ClosestPressPosition` semantics of the results heatmap.
+    pub presses: Vec<(f64, Vec2)>,
     /// Per-game-frame visual snapshots (filled by `run`).
     pub snapshots: Vec<FrameSnap>,
     /// Health processor output (filled at the end of `run`).
@@ -358,6 +371,7 @@ impl Engine {
             update_order,
             input_order,
             timeline: Vec::new(),
+            presses: Vec::new(),
             snapshots: Vec::new(),
             health: crate::health::HealthInfo::default(),
         }
@@ -674,6 +688,7 @@ impl Engine {
     // ------------------------------------------------------------------
 
     fn dispatch_press(&mut self, t: f64, action: Action) {
+        self.presses.push((t, self.cursor));
         for obj_idx in self.input_order.clone() {
             let obj = &self.objects[obj_idx];
             if t < obj.start_time - obj.time_preempt {
@@ -1313,6 +1328,7 @@ impl Engine {
                         accuracy: self.score.accuracy(),
                         unstable_rate: self.score.unstable_rate(),
                         time_offset: 0.0,
+                        cursor: self.cursor,
                     });
                     rt.completed_full_spins += 1;
                     continue;
@@ -1509,6 +1525,7 @@ impl Engine {
             accuracy: self.score.accuracy(),
             unstable_rate: self.score.unstable_rate(),
             time_offset,
+            cursor: self.cursor,
         };
         self.timeline.push(entry);
     }
