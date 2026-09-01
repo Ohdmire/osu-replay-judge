@@ -10,4 +10,6 @@ keywords = ["osu", "replay", "judgement", "beatmap", "lazer"]
 categories = ["game-development"]
 
 [dependencies]
-lzma-rs = "0.3.0"
+# Shared .osu/.osr parsing + processing pipeline (sibling checkout; when
+# publishing, osu-parse must be published first).
+osu-parse = { path = "../osu-parse" }

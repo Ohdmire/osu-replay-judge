@@ -109,15 +109,15 @@ osu-framework），包括浮点类型与运算顺序（f32 向量、f64 时间�
 ```
 src/
 ├── main.rs      CLI
-├── beatmap.rs   .osu 解析（控制点/物件/曲线字符串/隐式分段）
-├── process.rs   难度 mod、物件默认值、堆叠、嵌套生成
-├── path.rs      SliderPath + PathApproximator（f32 逐位移植）
-├── replay.rs    .osr 二进制 + LZMA 解压、帧修正
 ├── engine.rs    判定引擎（帧稳定主循环、hit policy、tracking、spinner）
 ├── score.rs     ScoreProcessor（分数/combo/acc/UR）+ classic 显示分
-├── health.rs    HealthProcessor（扣血表/combo尾加成/break/drain rate 求解）
-└── mods.rs      legacy mod 位、V2 倍率、速率
+└── health.rs    HealthProcessor（扣血表/combo尾加成/break/drain rate 求解）
 ```
+
+文件解析（`.osu`/`.osr`）、SliderPath 曲线数学、难度 mod/堆叠/嵌套生成
+管线（`beatmap`/`replay`/`path`/`process`/`mods`/`vec2` 模块）已抽取到共享
+crate [osu-parse](../osu-parse)（与 osu-replay-render / osu-storyboard-render
+共用），本 crate 直接 re-export 这些路径，既有引用不受影响。
 
 ## 验证
 
