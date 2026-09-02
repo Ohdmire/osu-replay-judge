@@ -12,4 +12,4 @@ categories = ["game-development"]
 [dependencies]
 # Shared .osu/.osr parsing + processing pipeline (sibling checkout; when
 # publishing, osu-parse must be published first).
-osu-parse = { path = "../osu-parse" }
+osu-parse = { git = "https://github.com/Ohdmire/osu-parse.git" }
