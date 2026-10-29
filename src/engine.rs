@@ -69,6 +69,20 @@ pub enum Action {
     Right,
 }
 
+/// One visual "note lock" shake, produced when a press is rejected with
+/// `ClickAction::Shake` (`DrawableHitCircle.CheckForResult` /
+/// `DrawableExtensions.Shake`). The renderer replays the 120ms
+/// `ShakeContainer` motion from this start time.
+#[derive(Clone, Copy, Debug)]
+pub struct ShakeEvent {
+    /// Press time (gameplay clock ms).
+    pub time: f64,
+    pub object_index: usize,
+    /// The receptor was a slider head (`DrawableSliderHead.Shake`, which also
+    /// shakes the parent slider body).
+    pub is_head: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct TimelineEntry {
     pub time: f64,
@@ -229,6 +243,8 @@ pub struct Engine {
     input_order: Vec<usize>,
 
     pub timeline: Vec<TimelineEntry>,
+    /// Rejected presses that shake a hit object (`ClickAction.Shake`).
+    pub shakes: Vec<ShakeEvent>,
     /// Every button press as `(time, cursor)` — the consumed replay
     /// frame's exact recorded position at the rising edge (lazer
     /// `HitReceptor` press events; smoke excluded). Feeds the
@@ -371,6 +387,7 @@ impl Engine {
             update_order,
             input_order,
             timeline: Vec::new(),
+            shakes: Vec::new(),
             presses: Vec::new(),
             snapshots: Vec::new(),
             health: crate::health::HealthInfo::default(),
@@ -793,7 +810,13 @@ impl Engine {
 
         let click_action = self.check_hittable(obj_idx, is_head, t, result);
         if result == HitResult::None || click_action != ClickAction::Hit {
-            // Shake - no judgement.
+            // Shake - no judgement. `DrawableHitCircle.CheckForResult`
+            // shakes on `ClickAction.Shake` even when the result is `None`
+            // (result == None makes the policy return Shake), and the
+            // slider head also shakes the parent slider body.
+            if click_action == ClickAction::Shake {
+                self.shakes.push(ShakeEvent { time: t, object_index: obj_idx, is_head });
+            }
             if is_head {
                 // PostProcessHeadJudgement still runs (but requires judged hit).
             }

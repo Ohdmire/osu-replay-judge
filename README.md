@@ -81,6 +81,10 @@ osu-framework），包括浮点类型与运算顺序（f32 向量、f64 时间�
 - **输入**：按键按下→圆心半径内 receptor 消费、事件传播顺序、同刻物件
   降序更新；`LegacyHitPolicy`（stable 音锁、堆叠锁、滑头遮挡）与
   `StartTimeOrderedHitPolicy`（乱序命中强 miss，且强 miss 先于触发命中计分）
+- **Note-lock 抖动事件**：每次被 hit policy 拒绝的按下（`ClickAction.Shake`）
+  写入 `Engine::shakes`（时间、物件、是否滑条头），供渲染端复刻
+  `ShakeContainer` / `DrawableExtensions.Shake` 的 30ms×8px 视觉；不改变
+  判定、combo 或计分
 - **Slider**：`SliderInputManager` 的 tracking 状态机（follow 圈、2.4x 扩
   展半径、头按键约束 `timeToAcceptAnyKeyAfter`、`HitAction` 首按锚定）、
   晚击头部的补判（`PostProcessHeadJudgement`）、tick/repeat/tail 判定
