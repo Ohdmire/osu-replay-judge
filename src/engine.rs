@@ -6,6 +6,7 @@ use crate::process::{NestedKind, ProcKind, ProcObject, ProcessedBeatmap, TAIL_LE
 use crate::replay::ReplayFrame;
 use crate::score::{hit_result_ext, HitResult, Judgement, ScoreProcessor};
 use crate::vec2::Vec2;
+use std::collections::VecDeque;
 
 pub const MISS_WINDOW: f64 = 400.0;
 const SIXTY_FRAME_TIME: f64 = 1000.0 / 60.0;
@@ -110,10 +111,15 @@ pub struct TimelineEntry {
 pub struct SpinnerSnap {
     pub object_index: usize,
     /// Raw accumulated visual rotation in degrees (`currentRotation`, can be
-    /// negative; the displayed disc angle damps toward this).
+    /// negative).
     pub visual_rotation: f32,
+    /// `SpinnerRotationTracker.Rotation`: the displayed angle, damped toward
+    /// `visual_rotation` with base 0.99 per elapsed millisecond.
+    pub display_rotation: f32,
     /// Score-side rotation (`SpinnerSpinHistory.TotalRotation`), degrees.
     pub total_rotation: f32,
+    /// `SpinnerSpmCalculator.Result` at this frame (spins per minute).
+    pub spm: f32,
     pub tracking: bool,
 }
 
@@ -149,6 +155,15 @@ struct SpinnerRuntime {
     tracking: bool,
     completed_spins: i32,
     total_accumulated_rotation: f32,
+    /// `SpinnerRotationTracker.Rotation`: display angle, damped toward
+    /// `total_accumulated_rotation`.
+    display_rotation: f32,
+    /// Time of the previous `RotationTracker.Update` (for the damp exponent).
+    last_rotation_update: f64,
+    /// `SpinnerSpmCalculator` record queue (time, `TotalRotation`), 595ms.
+    spm_records: VecDeque<(f64, f32)>,
+    /// `SpinnerSpmCalculator.Result`.
+    spm: f32,
     total_accumulated_rotation_at_last_completion: f32,
     current_spin_max_rotation: f32,
     last_report_time: f64,
@@ -165,6 +180,10 @@ impl SpinnerRuntime {
             tracking: false,
             completed_spins: 0,
             total_accumulated_rotation: 0.0,
+            display_rotation: 0.0,
+            last_rotation_update: f64::NEG_INFINITY,
+            spm_records: VecDeque::new(),
+            spm: 0.0,
             total_accumulated_rotation_at_last_completion: 0.0,
             current_spin_max_rotation: 0.0,
             last_report_time: f64::NEG_INFINITY,
@@ -594,7 +613,9 @@ impl Engine {
                             spinners.push(SpinnerSnap {
                                 object_index: i,
                                 visual_rotation: rt.total_accumulated_rotation,
+                                display_rotation: rt.display_rotation,
                                 total_rotation: rt.total_rotation(),
+                                spm: rt.spm,
                                 tracking: rt.tracking,
                             });
                         }
@@ -1297,6 +1318,51 @@ impl Engine {
         }
 
         rt.last_angle = Some(angle);
+
+        // `SpinnerRotationTracker.Update` (end of Update): the displayed
+        // angle damps toward the raw accumulated rotation with base 0.99
+        // per elapsed millisecond.
+        let elapsed = if rt.last_rotation_update.is_finite() {
+            (t - rt.last_rotation_update).abs()
+        } else {
+            SIXTY_FRAME_TIME
+        };
+        rt.last_rotation_update = t;
+        let damp_base = 0.99f64.powf(elapsed);
+        rt.display_rotation = (rt.total_accumulated_rotation as f64
+            + (rt.display_rotation as f64 - rt.total_accumulated_rotation as f64) * damp_base)
+            as f32;
+
+        // `DrawableSpinner.UpdateAfterChildren` -> `SpinnerSpmCalculator.
+        // SetRotation(Result.TotalRotation)`, every update while
+        // `Time.Current <= EndTime`. Kept in the engine so the value is
+        // correct at any snapshot (and on a seek/clip start) instead of
+        // only from the first rendered frame.
+        if t <= end {
+            let same = rt
+                .spm_records
+                .back()
+                .is_some_and(|(lt, _)| (t - lt).abs() < 1e-3);
+            if !same {
+                let total = rt.total_rotation();
+                if let Some(&(mut rec_t, mut rec_rot)) = rt.spm_records.front() {
+                    while rt
+                        .spm_records
+                        .front()
+                        .is_some_and(|(lt, _)| t - lt > 595.0)
+                    {
+                        let (lt, lr) = rt.spm_records.pop_front().unwrap();
+                        rec_t = lt;
+                        rec_rot = lr;
+                    }
+                    let dt = t - rec_t;
+                    if dt > 0.0 {
+                        rt.spm = ((total - rec_rot) as f64 / dt * 1000.0 * 60.0 / 360.0) as f32;
+                    }
+                }
+                rt.spm_records.push_back((t, total));
+            }
+        }
 
         // UpdateAfterChildren: CheckForResult (final judgement at end),
         // then updateBonusScore (tick awarding per completed spin).
