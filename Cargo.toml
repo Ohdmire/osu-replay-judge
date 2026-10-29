@@ -1,6 +1,6 @@
 [package]
 name = "osu_replay_judge"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 license = "MIT"
 description = "osu!standard replay judge: a Rust reimplementation of osu!lazer judgement, per-event exact (score/combo/accuracy/unstable rate)"
